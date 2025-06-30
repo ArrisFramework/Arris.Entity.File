@@ -2,9 +2,12 @@
 
 namespace Arris\Entity;
 
+use stdClass;
+
 interface FileInterface
 {
     public function __construct(string $path);
+    public function getState(): stdClass;
 
     public static function create(string $path, string $content = ''): self;
     public static function createTemp(string $prefix = ''):self;

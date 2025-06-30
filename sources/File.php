@@ -4,6 +4,7 @@ namespace Arris\Entity;
 
 use RuntimeException;
 use InvalidArgumentException;
+use stdClass;
 
 class File implements FileInterface
 {
@@ -49,6 +50,11 @@ class File implements FileInterface
      */
     public $handler;
 
+    /**
+     * @var stdClass Состояние после последней операции
+     */
+    private stdClass $lastOperationState;
+
 
     /**
      * File constructor.
@@ -68,6 +74,36 @@ class File implements FileInterface
         $this->pathinfo = pathinfo($path);
 
         $this->initFileMetadata();
+        $this->resetState();
+    }
+
+    /**
+     * Сбрасывает состояние операций
+     */
+    private function resetState(): void
+    {
+        $this->lastOperationState = new stdClass();
+        $this->lastOperationState->success = false;
+        $this->lastOperationState->operation = null;
+        $this->lastOperationState->bytes_processed = 0;
+        $this->lastOperationState->position = null;
+        $this->lastOperationState->error = null;
+    }
+
+    /**
+     * Возвращает состояние последней операции
+     *
+     * @return stdClass {
+     *     success: bool,
+     *     operation: ?string,
+     *     bytes_processed: int,
+     *     position: ?int,
+     *     error: ?string
+     * }
+     */
+    public function getState(): stdClass
+    {
+        return $this->lastOperationState;
     }
 
     /**
@@ -124,7 +160,6 @@ class File implements FileInterface
      *
      * @param string $content
      * @param int $flag, с флагом FILE_APPEND - допишет
-     * @todo: ТЕСТЫ
      * @return int Количество записанных байт
      */
     public function putContent(string $content, int $flag = 0): int
