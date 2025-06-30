@@ -389,6 +389,35 @@ class FileTest extends TestCase
         $this->assertFalse($file->exists());
     }
 
+    /**
+     * @return void
+     * @testdox Read from position
+     */
+    public function testReadFromPosition():void
+    {
+        $file = File::create(__DIR__ .'/temp/test.txt', "Test message");
+
+        $this->assertEquals("message", $file->readFromPosition(5));
+
+        $file->delete();
+    }
+
+    /**
+     * @return void
+     * @testdox Write from position and check content
+     */
+    public function testWriteFromPosition():void
+    {
+        $file = File::create(__DIR__ .'/temp/test.txt', "Test message about...");
+
+        $file->writeFromPosition("MESSAGE", 5);
+
+        $this->assertEquals("Test MESSAGE about...", $file->getContent());
+
+        $file->delete();
+    }
+
+
 
 
 

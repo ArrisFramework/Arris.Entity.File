@@ -58,7 +58,7 @@ class File implements FileInterface
      * @throws InvalidArgumentException Если файл не существует
      * @throws RuntimeException Если не удалось прочитать метаданные
      */
-    public function __construct(string $path, bool $is_temp = false)
+    public function __construct(string $path)
     {
         if (!file_exists($path)) {
             throw new InvalidArgumentException("File does not exist: {$path}");
@@ -68,7 +68,6 @@ class File implements FileInterface
         $this->pathinfo = pathinfo($path);
 
         $this->initFileMetadata();
-        $this->is_temp = $is_temp;
     }
 
     /**
@@ -482,7 +481,9 @@ class File implements FileInterface
             }
         }
 
-        return new self($temp_file, is_temp: true);
+        $file = new self($temp_file);
+        $file->is_temp = true;
+        return $file;
     }
 
     /**
@@ -516,14 +517,61 @@ class File implements FileInterface
         ];
     }
 
+    /**
+     * Записывает данные в файл с указанной позиции
+     *
+     * @param string $content Данные для записи
+     * @param int $position Позиция для начала записи
+     * @return int Количество записанных байт
+     * @throws RuntimeException Если не удалось выполнить запись
+     */
     public function writeFromPosition(string $content, int $position):int
     {
-        //@todo
+        if (!$this->is_opened) {
+            $this->open(self::FM_RW);
+        }
+
+        if (fseek($this->handler, $position) === -1) {
+            throw new RuntimeException("Failed to seek to position {$position} in file: {$this->path}");
+        }
+
+        $bytes = fwrite($this->handler, $content);
+        if ($bytes === false) {
+            throw new RuntimeException("Failed to write to file: {$this->path}");
+        }
+
+        // Обновляем метаданные после изменения файла
+        $this->initFileMetadata();
+        return $bytes;
     }
 
-    public function readFromPosition(int $position = 0, ?int $length = null):int
+    /**
+     * Читает данные из файла с указанной позиции
+     *
+     * @param int $position Позиция для начала чтения
+     * @param int|null $length Количество байт для чтения (null - до конца файла)
+     * @return string Прочитанные данные
+     * @throws RuntimeException Если не удалось выполнить чтение
+     */
+    public function readFromPosition(int $position = 0, ?int $length = null):string
     {
-        //@todo
+        if (!$this->is_opened) {
+            $this->open(self::FM_READ);
+        }
+
+        if (fseek($this->handler, $position) === -1) {
+            throw new RuntimeException("Failed to seek to position {$position} in file: {$this->path}");
+        }
+
+        $content = $length === null
+            ? fread($this->handler, $this->size - $position)
+            : fread($this->handler, $length);
+
+        if ($content === false) {
+            throw new RuntimeException("Failed to read from file: {$this->path}");
+        }
+
+        return $content;
     }
 
 

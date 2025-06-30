@@ -4,7 +4,7 @@ namespace Arris\Entity;
 
 interface FileInterface
 {
-    public function __construct(string $path, bool $is_temp = false);
+    public function __construct(string $path);
 
     public static function create(string $path, string $content = ''): self;
     public static function createTemp(string $prefix = ''):self;
@@ -42,12 +42,7 @@ interface FileInterface
     public function isImage(): bool;
     public function isVideo(): bool;
 
-    /**
-     * @param string $content
-     * @param int $position
-     * @return int
-     */
-    // public function writeFromPosition(string $content, int $position):int;
-    // public function readFromPosition(int $position = 0, ?int $length = null);
+    public function writeFromPosition(string $content, int $position):int;
+    public function readFromPosition(int $position = 0, ?int $length = null):string;
 
 }
