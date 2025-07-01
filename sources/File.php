@@ -66,21 +66,17 @@ class File implements FileInterface
      */
     public $handler;
 
-    // private OperationState $lastOperationState;
-
-
     /**
      * File constructor.
      *
      * @param string $path Путь к файлу
      *
-     * @throws InvalidArgumentException Если файл не существует
-     * @throws RuntimeException Если не удалось прочитать метаданные
+     * @throws FileException
      */
     public function __construct(string $path, bool $force_open = false)
     {
         if (!file_exists($path)) {
-            throw new InvalidArgumentException("File does not exist: {$path}");
+            throw FileException::create("File does not exist: %s", [ $path ]);
         }
 
         $this->path = $path;
@@ -94,58 +90,29 @@ class File implements FileInterface
     }
 
     /**
-     * Сбрасывает состояние операций
-     */
-    /*private function resetState(): void
-    {
-        $this->lastOperationState = new OperationState();
-        $this->lastOperationState->success = false;
-        $this->lastOperationState->operation = null;
-        $this->lastOperationState->bytes_processed = 0;
-        $this->lastOperationState->position = null;
-        $this->lastOperationState->error = null;
-    }*/
-
-    /**
-     * Возвращает состояние последней операции
-     *
-     * @return OperationState {
-     *     success: bool,
-     *     operation: ?string,
-     *     bytes_processed: int,
-     *     position: ?int,
-     *     error: ?string
-     * }
-     */
-    /*public function getState(): OperationState
-    {
-        return $this->lastOperationState;
-    }*/
-
-    /**
      * Инициализирует метаданные файла
      * @throws RuntimeException
+     * @throws FileException
      */
     private function initFileMetadata(): void
     {
         $size = filesize($this->path);
         if ($size === false) {
-            throw new RuntimeException("Failed to get file size: {$this->path}");
-            // throw FileException::create("Failed to get file size: %s", [ $this->path ]);
+            throw FileException::create("Failed to get file size:: %s", [ $this->path ]);
         }
 
         $this->size = $size;
 
         $mimetype = mime_content_type($this->path);
         if ($mimetype === false) {
-            throw new RuntimeException("Failed to detect MIME type: {$this->path}");
+            throw FileException::create("Failed to detect MIME type of file: %s", [  $this->path ]);
         }
 
         $this->mimeType = $mimetype;
 
         $file_mod_time = filemtime($this->path);
         if ($file_mod_time === false) {
-            throw new RuntimeException("Failed to get last modified time: {$this->path}");
+            throw FileException::create("Failed to get last modified time of file: %s", [ $this->path ]);
         }
         $this->lastModifiedTime = $file_mod_time;
 
@@ -173,6 +140,7 @@ class File implements FileInterface
      * @param int $position
      * @param int|null $length
      * @return string
+     * @throws FileException
      */
     public function getContent(int $position = 0, ?int $length = null): string
     {
@@ -182,7 +150,7 @@ class File implements FileInterface
 
         $content = file_get_contents($this->path);
         if ($content === false) {
-            throw new RuntimeException("Failed to read file: {$this->path}");
+            throw FileException::create("Failed to read file: %s", [ $this->path]);
         }
         return $content;
     }
@@ -191,14 +159,15 @@ class File implements FileInterface
      * Записать содержимое в файл
      *
      * @param string $content
-     * @param int $flag, с флагом FILE_APPEND - допишет
+     * @param int $flag , с флагом FILE_APPEND - допишет
      * @return int Количество записанных байт
+     * @throws FileException
      */
     public function putContent(string $content, int $flag = 0): int
     {
         $bytes = file_put_contents($this->path, $content, $flag);
         if ($bytes === false) {
-            throw new RuntimeException("Failed to write to file: {$this->path}");
+            throw FileException::create("Failed to write to file: %s", [ $this->path ]);
         }
 
         // Обновляем метаданные после изменения файла
@@ -211,6 +180,7 @@ class File implements FileInterface
      *
      * @param bool $just_in_case - Действия "на всякий случай". Если FALSE - требует, чтобы файл был ОТКРЫТ.
      * @return $this
+     * @throws FileException
      */
     public function close(bool $just_in_case = true):self
     {
@@ -226,7 +196,7 @@ class File implements FileInterface
         }
 
         if (!$this->is_opened && !$just_in_case) {
-            throw new RuntimeException("Can't close, file not opened: " . $this->path);
+            throw FileException::create("Can't close, file not opened: %s", [ $this->path ]);
         }
 
         return $this;
@@ -236,16 +206,17 @@ class File implements FileInterface
      * Удалить файл
      * @param bool $just_in_case
      * @return bool
+     * @throws FileException
      */
     public function delete(bool $just_in_case = true): bool
     {
         $unlink = unlink($this->path);
         if ($unlink === false && !$just_in_case) {
             if (!file_exists($this->path)) {
-                throw new RuntimeException("File not exists: {$this->path}");
+                throw FileException::create("File not exists: %s", [ $this->path ]);
             }
 
-            throw new RuntimeException("Unable to delete file: {$this->path}");
+            throw FileException::create("Unable to delete file: %s", [ $this->path] );
         }
         $this->is_exists = false;
         return true;
@@ -256,6 +227,7 @@ class File implements FileInterface
      *
      * @param int $size
      * @return bool
+     * @throws FileException
      */
     public function truncate(int $size = 0):bool
     {
@@ -267,12 +239,19 @@ class File implements FileInterface
         return $is_truncate;
     }
 
+    /**
+     * Move file
+     *
+     * @param string $newPath
+     * @return bool
+     * @throws FileException
+     */
     public function move(string $newPath): bool
     {
         if (str_ends_with($newPath, DIRECTORY_SEPARATOR)) {
             $currentName = $this->path_info['basename'] ?? '';
             if ($currentName === '') {
-                throw new RuntimeException('Cannot determine current filename');
+                throw FileException::create("Cannot determine current filename");
             }
             $newPath .= $currentName;
         }
@@ -290,12 +269,12 @@ class File implements FileInterface
      * Копировать файл
      * @param string $targetPath
      * @return File Новый экземпляр файла
-     * @throws RuntimeException Если не удалось скопировать
+     * @throws FileException Если не удалось скопировать
      */
     public function copy(string $targetPath): self
     {
         if (!copy($this->path, $targetPath)) {
-            throw new RuntimeException("Failed to copy file from {$this->path} to {$targetPath}");
+            throw FileException::create("Failed to copy file from %s to %s", [ $this->path, $targetPath ]);
         }
         return new self($targetPath);
     }
@@ -413,13 +392,13 @@ class File implements FileInterface
      * Получить хэш файла
      * @param string $algorithm Алгоритм хэширования (по умолчанию sha256)
      * @return string
-     * @throws RuntimeException Если не удалось вычислить хэш
+     * @throws FileException Если не удалось вычислить хэш
      */
     public function getHash(string $algorithm = 'sha256'): string
     {
         $hash = hash_file($algorithm, $this->path);
         if ($hash === false) {
-            throw new RuntimeException("Failed to calculate file hash: {$this->path}");
+            throw FileException::create("Failed to calculate file hash: %s ", [ $this->path]);
         }
         return $hash;
     }
@@ -536,6 +515,7 @@ class File implements FileInterface
      * @param int $position Позиция для начала записи
      * @return int Количество записанных байт
      * @throws RuntimeException Если не удалось выполнить запись
+     * @throws FileException
      */
     public function writeFromPosition(string $content, int $position):int
     {
@@ -544,12 +524,12 @@ class File implements FileInterface
         }
 
         if (fseek($this->handler, $position) === -1) {
-            throw new RuntimeException("Failed to seek to position {$position} in file: {$this->path}");
+            throw FileException::create("Failed to seek to position %s in file: %s", [$position, $this->path]);
         }
 
         $bytes = fwrite($this->handler, $content);
         if ($bytes === false) {
-            throw new RuntimeException("Failed to write to file: {$this->path}");
+            throw FileException::create("Failed to write to file: {$this->path}");
         }
 
         // Обновляем метаданные после изменения файла
@@ -564,6 +544,7 @@ class File implements FileInterface
      * @param int|null $length Количество байт для чтения (null - до конца файла)
      * @return string Прочитанные данные
      * @throws RuntimeException Если не удалось выполнить чтение
+     * @throws FileException
      */
     public function readFromPosition(int $position = 0, ?int $length = null):string
     {
@@ -572,7 +553,7 @@ class File implements FileInterface
         }
 
         if (fseek($this->handler, $position) === -1) {
-            throw new RuntimeException("Failed to seek to position {$position} in file: {$this->path}");
+            throw FileException::create("Failed to seek to position {$position} in file: {$this->path}");
         }
 
         $content = $length === null
@@ -580,7 +561,7 @@ class File implements FileInterface
             : fread($this->handler, $length);
 
         if ($content === false) {
-            throw new RuntimeException("Failed to read from file: {$this->path}");
+            throw FileException::create("Failed to read from file: {$this->path}");
         }
 
         return $content;
