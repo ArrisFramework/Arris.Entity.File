@@ -2,10 +2,13 @@
 
 namespace Arris\Entity;
 
+use Arris\Entity\Exceptions\FileException;
 use RuntimeException;
 use InvalidArgumentException;
-use stdClass;
 
+/**
+ *
+ */
 class File implements FileInterface
 {
     const FM_READ = 'r';
@@ -22,7 +25,7 @@ class File implements FileInterface
     /**
      * @var array Кешированные данные pathinfo
      */
-    private array $pathinfo;
+    private array $path_info;
 
     /**
      * @var int Размер файла в байтах
@@ -39,21 +42,31 @@ class File implements FileInterface
      */
     private int $lastModifiedTime;
 
+    /**
+     * Файл существует
+     *
+     * @var bool
+     */
     public bool $is_exists = false;
 
+    /**
+     * Временный файл
+     * @var bool
+     */
     public bool $is_temp = false;
 
+    /**
+     * Файл открыт
+     * @var bool
+     */
     public bool $is_opened = false;
 
     /**
-     * @var false|resource
+     * @var false|resource файловый хэндлер
      */
     public $handler;
 
-    /**
-     * @var stdClass Состояние после последней операции
-     */
-    private stdClass $lastOperationState;
+    // private OperationState $lastOperationState;
 
 
     /**
@@ -64,36 +77,39 @@ class File implements FileInterface
      * @throws InvalidArgumentException Если файл не существует
      * @throws RuntimeException Если не удалось прочитать метаданные
      */
-    public function __construct(string $path)
+    public function __construct(string $path, bool $force_open = false)
     {
         if (!file_exists($path)) {
             throw new InvalidArgumentException("File does not exist: {$path}");
         }
 
         $this->path = $path;
-        $this->pathinfo = pathinfo($path);
-
+        $this->path_info = pathinfo($path);
+        // $this->resetState();
         $this->initFileMetadata();
-        $this->resetState();
+
+        if ($force_open) {
+            $this->open();
+        }
     }
 
     /**
      * Сбрасывает состояние операций
      */
-    private function resetState(): void
+    /*private function resetState(): void
     {
-        $this->lastOperationState = new stdClass();
+        $this->lastOperationState = new OperationState();
         $this->lastOperationState->success = false;
         $this->lastOperationState->operation = null;
         $this->lastOperationState->bytes_processed = 0;
         $this->lastOperationState->position = null;
         $this->lastOperationState->error = null;
-    }
+    }*/
 
     /**
      * Возвращает состояние последней операции
      *
-     * @return stdClass {
+     * @return OperationState {
      *     success: bool,
      *     operation: ?string,
      *     bytes_processed: int,
@@ -101,10 +117,10 @@ class File implements FileInterface
      *     error: ?string
      * }
      */
-    public function getState(): stdClass
+    /*public function getState(): OperationState
     {
         return $this->lastOperationState;
-    }
+    }*/
 
     /**
      * Инициализирует метаданные файла
@@ -115,6 +131,7 @@ class File implements FileInterface
         $size = filesize($this->path);
         if ($size === false) {
             throw new RuntimeException("Failed to get file size: {$this->path}");
+            // throw FileException::create("Failed to get file size: %s", [ $this->path ]);
         }
 
         $this->size = $size;
@@ -136,6 +153,22 @@ class File implements FileInterface
     }
 
     /**
+     * Открывает файл, создавая файловый хэндлер
+     *
+     * @param string $mode
+     * @return $this
+     */
+    public function open(string $mode = self::FM_APPEND):self
+    {
+        $this->handler = fopen($this->path, $mode);
+        $this->is_opened = true;
+        // $this->lastOperationState->operation = 'open';
+        // $this->lastOperationState->success = true;
+
+        return $this;
+    }
+
+    /**
      * Получить содержимое файла
      * @param int $position
      * @param int|null $length
@@ -143,10 +176,9 @@ class File implements FileInterface
      */
     public function getContent(int $position = 0, ?int $length = null): string
     {
-        // @todo: если position не ноль - сдвигаем указатель, если length null - читаем до упора. Как вернуть статус последней операции?
-        // @todo: getLastStatus или getStatus (очевидно что LAST)
-
-        //@TODO
+        if ($position > 0 || !is_null($length)) {
+            return $this->readFromPosition($position, $length);
+        }
 
         $content = file_get_contents($this->path);
         if ($content === false) {
@@ -175,21 +207,6 @@ class File implements FileInterface
     }
 
     /**
-     * Открывает файл, создавая файловый хэндлер
-     *
-     * @param string $mode
-     * @return $this
-     */
-    public function open(string $mode = self::FM_APPEND):self
-    {
-        $this->handler = fopen($this->path, $mode);
-
-        $this->is_opened = true;
-
-        return $this;
-    }
-
-    /**
      * Закрывает файловый хэндлер
      *
      * @param bool $just_in_case - Действия "на всякий случай". Если FALSE - требует, чтобы файл был ОТКРЫТ.
@@ -197,23 +214,7 @@ class File implements FileInterface
      */
     public function close(bool $just_in_case = true):self
     {
-        if (!$this->is_opened && !$just_in_case) {
-            throw new RuntimeException("Can't close, file not opened: " . $this->path);
-        }
-
         if ($this->is_opened) {
-            fclose($this->handler);
-        }
-
-        $this->is_opened = false;
-
-        if ($this->is_temp) {
-            $this->delete(true);
-        }
-
-        return $this;
-
-        /*if ($this->is_opened) {
             fclose($this->handler);
             $this->is_opened = false;
 
@@ -228,7 +229,7 @@ class File implements FileInterface
             throw new RuntimeException("Can't close, file not opened: " . $this->path);
         }
 
-        return $this;*/
+        return $this;
     }
 
     /**
@@ -259,49 +260,27 @@ class File implements FileInterface
     public function truncate(int $size = 0):bool
     {
         $handler = $this->is_opened ? $this->handler : fopen($this->path, 'a+');
+
         $is_truncate = ftruncate($handler, $size);
-
-        // Обновляем метаданные после изменения файла
         $this->initFileMetadata();
-        return $is_truncate;
-    }
 
-    /**
-     * Переместить файл
-     *
-     * @todo: доработать, если целевой путь не содержит имени - нужно использовать текущее
-     *
-     * @param string $newPath
-     * @return bool
-     */
-    public function move_old(string $newPath): bool
-    {
-        $result = rename($this->path, $newPath);
-        if ($result) {
-            $this->path = $newPath;
-            $this->pathinfo = pathinfo($newPath);
-            $this->initFileMetadata();
-        }
-        return $result;
+        return $is_truncate;
     }
 
     public function move(string $newPath): bool
     {
-        // Если путь заканчивается на разделитель директорий
         if (str_ends_with($newPath, DIRECTORY_SEPARATOR)) {
-            // Получаем текущее имя файла
-            $currentName = $this->pathinfo['basename'] ?? '';
+            $currentName = $this->path_info['basename'] ?? '';
             if ($currentName === '') {
                 throw new RuntimeException('Cannot determine current filename');
             }
-            // Добавляем имя файла к целевому пути
             $newPath .= $currentName;
         }
 
         $result = rename($this->path, $newPath);
         if ($result) {
             $this->path = $newPath;
-            $this->pathinfo = pathinfo($newPath);
+            $this->path_info = pathinfo($newPath);
             $this->initFileMetadata();
         }
         return $result;
@@ -327,7 +306,7 @@ class File implements FileInterface
      */
     public function getExtension(): string
     {
-        return $this->pathinfo['extension'] ?? '';
+        return $this->path_info['extension'] ?? '';
     }
 
     /**
@@ -336,7 +315,7 @@ class File implements FileInterface
      */
     public function getFilename(): string
     {
-        return $this->pathinfo['basename'];
+        return $this->path_info['basename'];
     }
 
 
@@ -346,7 +325,7 @@ class File implements FileInterface
      */
     public function getFilenameWithoutExtension(): string
     {
-        return $this->pathinfo['filename'];
+        return $this->path_info['filename'];
     }
 
     /**
@@ -355,7 +334,7 @@ class File implements FileInterface
      */
     public function getDirectory(): string
     {
-        return $this->pathinfo['dirname'];
+        return $this->path_info['dirname'];
     }
 
     /**
@@ -530,8 +509,6 @@ class File implements FileInterface
         return file_exists($this->path);
     }
 
-    /* === */
-
     /**
      * Возвращает UID и GID владельца файла
      * @return array
@@ -607,6 +584,20 @@ class File implements FileInterface
         }
 
         return $content;
+    }
+
+    /**
+     * Проверяет, совпадает ли test с шаблоном pattern, который состоит из подстановочных знаков командной оболочки.
+     * https://www.php.net/manual/ru/function.fnmatch.php
+     *
+     * @param string $pattern
+     * @param string $test
+     * @param int $flags
+     * @return bool
+     */
+    public static function match(string $pattern, string $test, int $flags):bool
+    {
+        return fnmatch($pattern, $test, $flags);
     }
 
 

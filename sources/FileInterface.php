@@ -2,12 +2,18 @@
 
 namespace Arris\Entity;
 
-use stdClass;
-
+class OperationState
+{
+    public bool $success;
+    public ?string $operation;
+    public int $bytes_processed;
+    public ?int $position;
+    public ?string $error;
+}
 interface FileInterface
 {
     public function __construct(string $path);
-    public function getState(): stdClass;
+    // public function getState(): OperationState;
 
     public static function create(string $path, string $content = ''): self;
     public static function createTemp(string $prefix = ''):self;
@@ -42,10 +48,14 @@ interface FileInterface
 
     public function getHash(string $algorithm = 'sha256'): string;
 
+    public function getFileOwner(): array;
+
     public function isImage(): bool;
     public function isVideo(): bool;
 
     public function writeFromPosition(string $content, int $position):int;
     public function readFromPosition(int $position = 0, ?int $length = null):string;
+
+    public static function match(string $pattern, string $test, int $flags):bool;
 
 }
